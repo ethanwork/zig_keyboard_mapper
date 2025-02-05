@@ -1,36 +1,66 @@
 const std = @import("std");
 
-// The original code had this snippet below for making a wide UTF-16 string, but
-// the compiler didn't recognize std.mem.wcsZ, so googling it I saw this example
-// of std.unicode.utf8ToUtf16LeStringLiteral, and it works, so I replaced it with this
-// with a shorthand alias of W being used in their code example which I also copied.
-//     Convert a Zig string to wide UTF-16
-//     const text = try std.mem.wcsZ("Hello from Zig!");
-//     const caption = try std.mem.wcsZ("Zig MessageBox");
-const W = std.unicode.utf8ToUtf16LeStringLiteral;
+// Windows API function signatures
+extern "user32" fn SetWindowsHookExW(idHook: c_int, lpfn: *const fn (c_int, usize, ?*KBDLLHOOKSTRUCT) callconv(.C) c_int, hMod: ?*usize, dwThreadId: u32) ?*usize;
+extern "user32" fn CallNextHookEx(hhk: ?*usize, nCode: c_int, wParam: usize, lParam: ?*KBDLLHOOKSTRUCT) callconv(.C) c_int;
+extern "user32" fn GetMessageW(lpMsg: *MSG, hWnd: ?*usize, wMsgFilterMin: u32, wMsgFilterMax: u32) c_int;
+extern "user32" fn TranslateMessage(lpMsg: *const MSG) c_int;
+extern "user32" fn DispatchMessageW(lpMsg: *const MSG) c_int;
 
-// notes:
-// hWnd change: originally this code was using ?usize for hWnd, but it gave the error saying that a parameter of type ?usize is
-// not allowed in a function with calling conventione "Stdcall" (later changed to ".C" call, but this is also true for ".C" calls.
-// and this occurs because ?usize is not a pointer type, and Zig only allows pointer-like optionals in extern function declarations.
-// gpt originally suggested making it ?*anyopaque, which worked, but I thought if it is just that usize needs to be a pointer type
-// to be optional, switch it to ?*usize, and this worked. It sounds like a nullable window handle (HWND in windows api terms) is needed
-// hence we needed a nullable data type here, and for external calls they don't work with nullable regular data types, just nullable
-// pointer types which it sounds like can be used to externally work with C libraries, but C libraries don't understand the concept
-// of a Zig 'optional' regular data type I guess, but a optional pointer can just be set to null is my guess as to why this works.
-// callConv(.C) change: the code also originally had "callConv(.Stdcall)", but it gave this error when using it
-//    error: callconv 'Stdcall' is only available on x86, not x86_64
-// Switching it to ".C" fixed this error, because Stdcall is a 32-bit x86 calling convention, and modern windows apps running on
-// x86_64 use the "System V" or "Windows Fastcall" convention.
-extern "user32" fn MessageBoxW(hWnd: ?*usize, lpText: [*:0]const u16, lpCaption: [*:0]const u16, uType: u32) callconv(.C) c_int;
+// Windows Structs
+const MSG = extern struct {
+    hwnd: ?*usize,
+    message: u32,
+    wParam: usize,
+    lParam: isize,
+    time: u32,
+    pt: POINT,
+};
+
+const POINT = extern struct {
+    x: i32,
+    y: i32,
+};
+
+const KBDLLHOOKSTRUCT = extern struct {
+    vkCode: u32,
+    scanCode: u32,
+    flags: u32,
+    time: u32,
+    dwExtraInfo: usize,
+};
+
+// Global variable to hold hook handle
+var hook_handle: ?*usize = null;
+
+// Define keyboard hook callback as a function pointer
+fn keyboardHookCallback(nCode: c_int, wParam: usize, lParam: ?*KBDLLHOOKSTRUCT) callconv(.C) c_int {
+    if (nCode >= 0 and lParam != null) {
+        std.debug.print("Key Pressed: {}\n", .{lParam.?.vkCode});
+    }
+    return CallNextHookEx(hook_handle, nCode, wParam, lParam);
+}
+
+// Ensure the function pointer is explicitly cast
+const keyboardHookPtr: *const fn (c_int, usize, ?*KBDLLHOOKSTRUCT) callconv(.C) c_int = keyboardHookCallback;
 
 pub fn main() !void {
-    // Convert a Zig string to wide UTF-16
-    const text = W("Hello from Zig!");
-    const caption = W("Zig MessageBox");
+    // Set the keyboard hook
+    const WH_KEYBOARD_LL = 13;
+    const hInstance: ?*usize = null; // No module handle needed for global hooks
 
-    _ = MessageBoxW(null, text, caption, 0);
+    hook_handle = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardHookPtr, hInstance, 0);
+    if (hook_handle == null) {
+        std.debug.print("Failed to set keyboard hook\n", .{});
+        return;
+    }
 
-    const stdout = std.io.getStdOut().writer();
-    try stdout.print("Check your screen for a message box!\n", .{});
+    std.debug.print("Keyboard hook installed. Press any key...\n", .{});
+
+    // Windows message loop to keep the hook running
+    var msg: MSG = undefined;
+    while (GetMessageW(&msg, null, 0, 0) > 0) {
+        _ = TranslateMessage(&msg);
+        _ = DispatchMessageW(&msg);
+    }
 }
