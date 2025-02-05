@@ -1,45 +1,36 @@
-//! By convention, main.zig is where your main function lives in the case that
-//! you are building an executable. If you are making a library, the convention
-//! is to delete this file and start with root.zig instead.
-
-pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
-
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
-
-    try bw.flush(); // Don't forget to flush!
-}
-
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
-
-test "use other module" {
-    try std.testing.expectEqual(@as(i32, 150), lib.add(100, 50));
-}
-
-test "fuzz example" {
-    const global = struct {
-        fn testOne(input: []const u8) anyerror!void {
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
-    try std.testing.fuzz(global.testOne, .{});
-}
-
 const std = @import("std");
 
-/// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
-const lib = @import("zig_keyboard_mapper_lib");
+// The original code had this snippet below for making a wide UTF-16 string, but
+// the compiler didn't recognize std.mem.wcsZ, so googling it I saw this example
+// of std.unicode.utf8ToUtf16LeStringLiteral, and it works, so I replaced it with this
+// with a shorthand alias of W being used in their code example which I also copied.
+//     Convert a Zig string to wide UTF-16
+//     const text = try std.mem.wcsZ("Hello from Zig!");
+//     const caption = try std.mem.wcsZ("Zig MessageBox");
+const W = std.unicode.utf8ToUtf16LeStringLiteral;
+
+// notes:
+// hWnd change: originally this code was using ?usize for hWnd, but it gave the error saying that a parameter of type ?usize is
+// not allowed in a function with calling conventione "Stdcall" (later changed to ".C" call, but this is also true for ".C" calls.
+// and this occurs because ?usize is not a pointer type, and Zig only allows pointer-like optionals in extern function declarations.
+// gpt originally suggested making it ?*anyopaque, which worked, but I thought if it is just that usize needs to be a pointer type
+// to be optional, switch it to ?*usize, and this worked. It sounds like a nullable window handle (HWND in windows api terms) is needed
+// hence we needed a nullable data type here, and for external calls they don't work with nullable regular data types, just nullable
+// pointer types which it sounds like can be used to externally work with C libraries, but C libraries don't understand the concept
+// of a Zig 'optional' regular data type I guess, but a optional pointer can just be set to null is my guess as to why this works.
+// callConv(.C) change: the code also originally had "callConv(.Stdcall)", but it gave this error when using it
+//    error: callconv 'Stdcall' is only available on x86, not x86_64
+// Switching it to ".C" fixed this error, because Stdcall is a 32-bit x86 calling convention, and modern windows apps running on
+// x86_64 use the "System V" or "Windows Fastcall" convention.
+extern "user32" fn MessageBoxW(hWnd: ?*usize, lpText: [*:0]const u16, lpCaption: [*:0]const u16, uType: u32) callconv(.C) c_int;
+
+pub fn main() !void {
+    // Convert a Zig string to wide UTF-16
+    const text = W("Hello from Zig!");
+    const caption = W("Zig MessageBox");
+
+    _ = MessageBoxW(null, text, caption, 0);
+
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print("Check your screen for a message box!\n", .{});
+}
