@@ -1,19 +1,20 @@
 const std = @import("std");
 
 // Windows API function signatures
-extern "user32" fn SetWindowsHookExW(idHook: c_int, lpfn: *const fn (c_int, usize, ?*KBDLLHOOKSTRUCT) callconv(.C) c_int, hMod: ?*usize, dwThreadId: u32) ?*usize;
-extern "user32" fn UnhookWindowsHookEx(hhk: ?*usize) callconv(.C) bool;
-extern "user32" fn CallNextHookEx(hhk: ?*usize, nCode: c_int, wParam: usize, lParam: ?*KBDLLHOOKSTRUCT) callconv(.C) c_int;
-extern "user32" fn GetMessageW(lpMsg: *MSG, hWnd: ?*usize, wMsgFilterMin: u32, wMsgFilterMax: u32) c_int;
-extern "user32" fn TranslateMessage(lpMsg: *const MSG) c_int;
-extern "user32" fn DispatchMessageW(lpMsg: *const MSG) c_int;
-extern "user32" fn GetKeyboardState(lpKeyState: [*]u8) callconv(.C) bool;
 
 const win = struct {
     const WM_KEYDOWN = 0x0100;
     const WM_KEYUP = 0x0101;
     const WM_SYSKEYDOWN = 0x0104;
     const WM_SYSKEYUP = 0x0105;
+
+    pub extern "user32" fn SetWindowsHookExW(idHook: c_int, lpfn: *const fn (c_int, usize, ?*KBDLLHOOKSTRUCT) callconv(.C) c_int, hMod: ?*usize, dwThreadId: u32) ?*usize;
+    pub extern "user32" fn UnhookWindowsHookEx(hhk: ?*usize) callconv(.C) bool;
+    pub extern "user32" fn CallNextHookEx(hhk: ?*usize, nCode: c_int, wParam: usize, lParam: ?*KBDLLHOOKSTRUCT) callconv(.C) c_int;
+    pub extern "user32" fn GetMessageW(lpMsg: *MSG, hWnd: ?*usize, wMsgFilterMin: u32, wMsgFilterMax: u32) c_int;
+    pub extern "user32" fn TranslateMessage(lpMsg: *const MSG) c_int;
+    pub extern "user32" fn DispatchMessageW(lpMsg: *const MSG) c_int;
+    pub extern "user32" fn GetKeyboardState(lpKeyState: [*]u8) callconv(.C) bool;
 };
 
 // Windows Structs
@@ -57,7 +58,7 @@ fn keyboardHookCallback(nCode: c_int, wParam: usize, lParam: ?*KBDLLHOOKSTRUCT) 
 
         std.debug.print("Key Event: {s}, vkCode: {}\n", .{ eventType, lParam.?.vkCode });
     }
-    return CallNextHookEx(hook_handle, nCode, wParam, lParam);
+    return win.CallNextHookEx(hook_handle, nCode, wParam, lParam);
 }
 
 // Ensure the function pointer is explicitly cast
@@ -68,8 +69,8 @@ pub fn main() !void {
     const WH_KEYBOARD_LL = 13;
     const hInstance: ?*usize = null; // No module handle needed for global hooks
 
-    hook_handle = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardHookPtr, hInstance, 0);
-    defer _ = UnhookWindowsHookEx(hook_handle);
+    hook_handle = win.SetWindowsHookExW(WH_KEYBOARD_LL, keyboardHookPtr, hInstance, 0);
+    defer _ = win.UnhookWindowsHookEx(hook_handle);
 
     if (hook_handle == null) {
         std.debug.print("Failed to set keyboard hook\n", .{});
@@ -80,8 +81,8 @@ pub fn main() !void {
 
     // Windows message loop to keep the hook running
     var msg: MSG = undefined;
-    while (GetMessageW(&msg, null, 0, 0) > 0) {
-        _ = TranslateMessage(&msg);
-        _ = DispatchMessageW(&msg);
+    while (win.GetMessageW(&msg, null, 0, 0) > 0) {
+        _ = win.TranslateMessage(&msg);
+        _ = win.DispatchMessageW(&msg);
     }
 }
