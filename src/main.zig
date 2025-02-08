@@ -48,28 +48,81 @@ const KBDLLHOOKSTRUCT = extern struct {
     dwExtraInfo: usize,
 };
 
-// Global variable to hold hook handle
+// Global variables
 var hook_handle: ?*usize = null;
+var a_pressed: bool = false;
+var o_pressed: bool = false;
+var chord_triggered: bool = false;
+var a_press_time: u32 = 0;
 
 fn keyboardHookCallback(nCode: c_int, wParam: usize, lParam: ?*KBDLLHOOKSTRUCT) callconv(.C) c_int {
     if (nCode >= 0 and lParam != null) {
-        const vkCode = lParam.?.vkCode;
+        const hook_struct = lParam.?;
+        const vkCode = hook_struct.vkCode;
+        const event_time = hook_struct.time;
+        const is_key_down = (wParam == win.WM_KEYDOWN or wParam == win.WM_SYSKEYDOWN);
+        const is_key_up = (wParam == win.WM_KEYUP or wParam == win.WM_SYSKEYUP);
 
-        // Check if the 'W' key (key code 87) is pressed
-        if (vkCode == 87 and (wParam == win.WM_KEYDOWN or wParam == win.WM_SYSKEYDOWN)) {
-            // Suppress the original 'W' key event
-            // Simulate the 'A' key press
-            win.keybd_event(65, 0, 0, 0); // Key down
-            //win.keybd_event(65, 0, 0x0002, 0); // Key up
-
-            // Return 1 to suppress the original key event
-            return 1;
-        }
-        if (vkCode == 87 and (wParam == win.WM_KEYUP or wParam == win.WM_SYSKEYUP)) {
-            win.keybd_event(65, 0, 0x0002, 0); // Key up
-            return 1;
+        // Handle 'a' key down
+        if (is_key_down and vkCode == 0x41) { // VK_A
+            a_pressed = true;
+            a_press_time = event_time;
+            return 1; // Suppress 'A' key down
         }
 
+        // Handle 'o' key down
+        if (is_key_down and vkCode == 0x4F) { // VK_O
+            if (a_pressed and (event_time - a_press_time) <= 100) {
+                chord_triggered = true;
+                o_pressed = true;
+                win.keybd_event(0x59, 0, 0, 0); // Simulate 'Y' key down
+                return 1; // Suppress 'O' key down
+            }
+        }
+
+        // Handle 'a' key up
+        if (is_key_up and vkCode == 0x41) { // VK_A
+            if (a_pressed) {
+                a_pressed = false;
+                if (chord_triggered) {
+                    if (!o_pressed) {
+                        win.keybd_event(0x59, 0, 0x0002, 0); // Simulate 'Y' key up
+                        chord_triggered = false;
+                    }
+                } else {
+                    // Send 'A' down followed by up
+                    win.keybd_event(0x41, 0, 0, 0); // 'A' down
+                    win.keybd_event(0x41, 0, 0x0002, 0); // 'A' up
+                }
+                return 1; // Suppress original 'A' key up
+            }
+        }
+
+        // Handle 'o' key up
+        if (is_key_up and vkCode == 0x4F) { // VK_O
+            if (chord_triggered and o_pressed) {
+                o_pressed = false;
+                if (!a_pressed) {
+                    win.keybd_event(0x59, 0, 0x0002, 0); // Simulate 'Y' key up
+                    chord_triggered = false;
+                }
+                return 1; // Suppress original 'O' key up
+            }
+        }
+
+        // Original 'W' to 'A' replacement logic
+        if (vkCode == 87) { // VK_W
+            if (is_key_down) {
+                win.keybd_event(65, 0, 0, 0); // 'A' down
+                return 1;
+            }
+            if (is_key_up) {
+                win.keybd_event(65, 0, 0x0002, 0); // 'A' up
+                return 1;
+            }
+        }
+
+        // Debug print logic (original)
         var eventType: []const u8 = "Unknown event";
         switch (wParam) {
             win.WM_KEYDOWN => eventType = "WM_KEYDOWN",
@@ -81,33 +134,19 @@ fn keyboardHookCallback(nCode: c_int, wParam: usize, lParam: ?*KBDLLHOOKSTRUCT) 
 
         std.debug.print("Key Event: {s}, vkCode: {}", .{ eventType, vkCode });
 
-        // Process key down events to get characters
-        if (wParam == win.WM_KEYDOWN or wParam == win.WM_SYSKEYDOWN) {
+        if (is_key_down) {
             var keyState: [256]u8 = undefined;
+            @memset(&keyState, 0);
 
-            // Initialize all keys to up
-            for (&keyState) |*k| {
-                k.* = 0;
-            }
-
-            // Check modifier states using GetAsyncKeyState
-            if (win.GetAsyncKeyState(win.VK_SHIFT) & 0x8000 != 0) {
-                keyState[win.VK_SHIFT] = 0x80;
-            }
-            if (win.GetAsyncKeyState(win.VK_CONTROL) & 0x8000 != 0) {
-                keyState[win.VK_CONTROL] = 0x80;
-            }
-            if (win.GetAsyncKeyState(win.VK_MENU) & 0x8000 != 0) {
-                keyState[win.VK_MENU] = 0x80;
-            }
-            if (win.GetAsyncKeyState(win.VK_CAPITAL) & 0x0001 != 0) {
-                keyState[win.VK_CAPITAL] = 0x01;
-            }
+            if (win.GetAsyncKeyState(win.VK_SHIFT) & 0x8000 != 0) keyState[win.VK_SHIFT] = 0x80;
+            if (win.GetAsyncKeyState(win.VK_CONTROL) & 0x8000 != 0) keyState[win.VK_CONTROL] = 0x80;
+            if (win.GetAsyncKeyState(win.VK_MENU) & 0x8000 != 0) keyState[win.VK_MENU] = 0x80;
+            if (win.GetAsyncKeyState(win.VK_CAPITAL) & 0x0001 != 0) keyState[win.VK_CAPITAL] = 0x01;
 
             var buffer: [8]u16 = undefined;
             const result = win.ToUnicode(
                 vkCode,
-                lParam.?.scanCode,
+                hook_struct.scanCode,
                 @ptrCast(&keyState),
                 buffer[0..].ptr,
                 @intCast(buffer.len),
