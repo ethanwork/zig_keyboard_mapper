@@ -15,6 +15,7 @@ const win = struct {
     pub extern "user32" fn TranslateMessage(lpMsg: *const MSG) c_int;
     pub extern "user32" fn DispatchMessageW(lpMsg: *const MSG) c_int;
     pub extern "user32" fn GetKeyboardState(lpKeyState: [*]u8) callconv(.C) bool;
+    pub extern "user32" fn ToUnicode(vkCode: u32, scanCode: u32, lpKeyState: [*]const u8, pwszBuff: [*]u16, cchBuff: i32, wFlags: u32) callconv(.Stdcall) i32;
 };
 
 // Windows Structs
