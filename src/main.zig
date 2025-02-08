@@ -22,6 +22,7 @@ const win = struct {
     pub extern "user32" fn DispatchMessageW(lpMsg: *const MSG) c_int;
     pub extern "user32" fn GetAsyncKeyState(vKey: c_int) callconv(.C) u16;
     pub extern "user32" fn ToUnicode(vkCode: u32, scanCode: u32, lpKeyState: [*]const u8, pwszBuff: [*]u16, cchBuff: i32, wFlags: u32) callconv(.C) i32;
+    pub extern "user32" fn keybd_event(bVk: u8, bScan: u8, dwFlags: u32, dwExtraInfo: usize) callconv(.C) void;
 };
 
 // Windows Structs
@@ -52,6 +53,19 @@ var hook_handle: ?*usize = null;
 
 fn keyboardHookCallback(nCode: c_int, wParam: usize, lParam: ?*KBDLLHOOKSTRUCT) callconv(.C) c_int {
     if (nCode >= 0 and lParam != null) {
+        const vkCode = lParam.?.vkCode;
+
+        // Check if the 'W' key (key code 87) is pressed
+        if (vkCode == 87 and (wParam == win.WM_KEYDOWN or wParam == win.WM_SYSKEYDOWN)) {
+            // Suppress the original 'W' key event
+            // Simulate the 'A' key press
+            win.keybd_event(65, 0, 0, 0); // Key down
+            win.keybd_event(65, 0, 0x0002, 0); // Key up
+
+            // Return 1 to suppress the original key event
+            return 1;
+        }
+
         var eventType: []const u8 = "Unknown event";
         switch (wParam) {
             win.WM_KEYDOWN => eventType = "WM_KEYDOWN",
@@ -61,7 +75,7 @@ fn keyboardHookCallback(nCode: c_int, wParam: usize, lParam: ?*KBDLLHOOKSTRUCT) 
             else => {},
         }
 
-        std.debug.print("Key Event: {s}, vkCode: {}", .{ eventType, lParam.?.vkCode });
+        std.debug.print("Key Event: {s}, vkCode: {}", .{ eventType, vkCode });
 
         // Process key down events to get characters
         if (wParam == win.WM_KEYDOWN or wParam == win.WM_SYSKEYDOWN) {
@@ -88,7 +102,7 @@ fn keyboardHookCallback(nCode: c_int, wParam: usize, lParam: ?*KBDLLHOOKSTRUCT) 
 
             var buffer: [8]u16 = undefined;
             const result = win.ToUnicode(
-                lParam.?.vkCode,
+                vkCode,
                 lParam.?.scanCode,
                 @ptrCast(&keyState),
                 buffer[0..].ptr,
