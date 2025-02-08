@@ -60,9 +60,13 @@ fn keyboardHookCallback(nCode: c_int, wParam: usize, lParam: ?*KBDLLHOOKSTRUCT) 
             // Suppress the original 'W' key event
             // Simulate the 'A' key press
             win.keybd_event(65, 0, 0, 0); // Key down
-            win.keybd_event(65, 0, 0x0002, 0); // Key up
+            //win.keybd_event(65, 0, 0x0002, 0); // Key up
 
             // Return 1 to suppress the original key event
+            return 1;
+        }
+        if (vkCode == 87 and (wParam == win.WM_KEYUP or wParam == win.WM_SYSKEYUP)) {
+            win.keybd_event(65, 0, 0x0002, 0); // Key up
             return 1;
         }
 
